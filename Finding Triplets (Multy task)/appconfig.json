@@ -1,0 +1,7 @@
+{
+  "sourceFilePath": "test1.txt",
+  "output": "console",
+  "resultFilePath": "result.txt",
+  "count": 10,
+  "coefficientOfProcessorUsing": 0.6
+}
