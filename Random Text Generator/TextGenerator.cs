@@ -4,14 +4,9 @@ namespace Random_Text_Generator
 {
     public class RandomTextGenerator
     {
-        public void Generate(Stream outPutStream, long countOfsymbols)
+        public void Generate(Stream outPutStream, int countOfbytes)
         {
-            var random = new Random();
 
-            for (int i = 0; i < countOfsymbols; i++)
-            {
-                outPutStream.WriteByte((byte)random.Next(60, 150));
-            }
         }
     }
 }

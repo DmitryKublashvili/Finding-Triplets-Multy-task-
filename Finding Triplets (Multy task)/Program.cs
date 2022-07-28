@@ -1,6 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Random_Text_Generator;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using Triplets_Extractor;
 using static Finding_Triplets__Multy_task_.StartUp;
@@ -12,12 +12,7 @@ namespace Finding_Triplets__Multy_task_
     {
         static void Main(string[] args)
         {
-            //using var generatedTextFileStream = File.Open(@"test1.txt", FileMode.OpenOrCreate);
-            //new RandomTextGenerator().Generate(generatedTextFileStream, 1_000_000_000);
-
-            //Console.WriteLine("Generation done.");
-            //Console.ReadLine();
-            //generatedTextFileStream.Close();
+            CultureInfo cultureInfo = CultureInfo.InvariantCulture;
 
             var filePath = Configuration["sourceFilePath"];
 
@@ -29,11 +24,17 @@ namespace Finding_Triplets__Multy_task_
 
             if (!int.TryParse(Configuration["count"], out int countOfTriplets))
             {
-                Console.WriteLine("Count was less or equals zero");
+                Console.WriteLine("Count value has invalid format");
                 return;
             }
 
-            using var inputStream = new FileStream(filePath, FileMode.Open);
+            if (!float.TryParse(Configuration["coefficientOfProcessorUsing"], NumberStyles.Float, cultureInfo, out float coefficientOfProcessorUsing))
+            {
+                Console.WriteLine("Coefficient Of Processor Using has invalid format");
+                return;
+            }
+
+            using var inputStream = new StreamReader(filePath);
             using var outputStream = new MemoryStream();
             OutputFormat<string> outputStringFormatDelegate = OutputFormat;
 
@@ -43,12 +44,29 @@ namespace Finding_Triplets__Multy_task_
                 .SetOutputStream(outputStream)
                 .SetCount(countOfTriplets)
                 .SetFormat(outputStringFormatDelegate)
+                .SetCoefficientOfProcessorUsing(coefficientOfProcessorUsing)
                 .Build();
 
             Stopwatch stopwatch = Stopwatch.StartNew();
 
-            //var task = Task.Run(() => extractor.Do());
-            var task = Task.Run(() => extractor.DoInMultytaskScenario());
+            var mode = Environment.GetEnvironmentVariable("mode");
+
+            Task task;
+            switch (mode)
+            {
+                case "multy":
+                    task = Task.Run(() => {
+                            Console.WriteLine("Multytask scenario");
+                            extractor.DoInMultytaskScenario();
+                    });
+                    break;
+                default:
+                    task = Task.Run(() => {
+                        Console.WriteLine("Single thread scenario");
+                        extractor.Do();
+                    });
+                    break;
+            }
 
             var taskContinuation = task.ContinueWith(t => Task.Run(async () => {
                 await SendResults(outputStream, stopwatch, countOfTriplets);
@@ -73,6 +91,7 @@ namespace Finding_Triplets__Multy_task_
                     break;
                 case "file":
                     await File.WriteAllBytesAsync(Configuration["resultFilePath"], outputStream.ToArray());
+                    Console.WriteLine("The result is recorded in the file");
                     break;
                 //
                 // some more options
@@ -81,14 +100,14 @@ namespace Finding_Triplets__Multy_task_
                     break;
             }
 
-            Console.WriteLine("extraction done");
+            Console.WriteLine("Extraction done");
             stopwatch.Stop();
-            Console.WriteLine($"execution time is: {stopwatch.ElapsedMilliseconds} ms");
+            Console.WriteLine($"Execution time is: {stopwatch.ElapsedMilliseconds} ms");
         }
 
-        private static string OutputFormat(byte firstChar, byte secondChar, byte thirdChar, int count)
+        private static string OutputFormat(char firstChar, char secondChar, char thirdChar, int count)
         {
-            return new string(new char[] { (char)firstChar, (char)secondChar, (char)thirdChar })
+            return new string(new char[] { firstChar, secondChar, thirdChar })
                 + " " + count
                 + Environment.NewLine;
         }

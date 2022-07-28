@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -15,7 +15,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Random Text Generator\Random Text Generator.csproj" />
     <ProjectReference Include="..\Triplets_Extractor\Triplets_Extractor_Lib.csproj" />
   </ItemGroup>
 
@@ -26,6 +25,9 @@
 	<None Update="test1.txt">
 	  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 	</None>
+	  <None Update="test.txt">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </None>
   </ItemGroup>
 
 </Project>

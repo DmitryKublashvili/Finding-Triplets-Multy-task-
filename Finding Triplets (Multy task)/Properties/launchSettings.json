@@ -1,0 +1,16 @@
+{
+  "profiles": {
+    "Finding Triplets (Multy task)": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "mode": "multy"
+      }
+    },
+    "SingleThreadMode": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "mode": "single"
+      }
+    }
+  }
+}

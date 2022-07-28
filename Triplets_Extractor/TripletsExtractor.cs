@@ -4,7 +4,7 @@ using System.Text;
 
 namespace Triplets_Extractor
 {
-    public delegate OutT OutputFormat<OutT>(byte firstChar, byte secondChar, byte thirdChar, int count);
+    public delegate OutT OutputFormat<OutT>(char firstChar, char secondChar, char thirdChar, int count);
 
     /// <summary>
     /// Triplets exstracor type. Provides ability to extract and return triplets from stream according settings.
@@ -12,10 +12,12 @@ namespace Triplets_Extractor
     /// <typeparam name="OutT">Out format depending on appropriate delegate</typeparam>
     public class TripletsExtractor<OutT>
     {
-        private readonly Stream _inputStream;
+        const int MinFileSizeForMultytaskScenario = 100;
+
+        private readonly StreamReader _inputStream;
         private readonly Stream _outputStream;
         private readonly OutputFormat<OutT> _outputFormat;
-        private readonly float _coefficientOfProcessorUsing = 0.6f;
+        private readonly float _coefficientOfProcessorUsing = 0.6f; // value by default
 
         /// <summary>
         /// Initialize instance of TripletsExtractor.
@@ -25,7 +27,7 @@ namespace Triplets_Extractor
         /// <param name="count">Count of triplets</param>
         /// <param name="format">Delegate for output format.</param>
         /// <exception cref="ArgumentNullException"></exception>
-        public TripletsExtractor(Stream inputStream, Stream outputStream, int count, OutputFormat<OutT> format)
+        public TripletsExtractor(StreamReader inputStream, Stream outputStream, int count, OutputFormat<OutT> format)
         {
             _inputStream = inputStream ?? throw new ArgumentNullException(nameof(inputStream));
             _outputStream = outputStream ?? throw new ArgumentNullException(nameof(outputStream));
@@ -42,7 +44,7 @@ namespace Triplets_Extractor
         /// <param name="format">Delegate for output format.</param>
         /// <param name="coefficientOfProcessorUsing">Coefficient of processor using for multytask scenario.</param>
         /// <exception cref="ArgumentNullException"></exception>
-        public TripletsExtractor(Stream inputStream, Stream outputStream, int count, OutputFormat<OutT> format, float coefficientOfProcessorUsing) 
+        public TripletsExtractor(StreamReader inputStream, Stream outputStream, int count, OutputFormat<OutT> format, float coefficientOfProcessorUsing) 
             : this(inputStream, outputStream, count, format)
         {
             _coefficientOfProcessorUsing = coefficientOfProcessorUsing;
@@ -60,7 +62,7 @@ namespace Triplets_Extractor
         {
             var dictionary = FillDictionary();
             var outputItems = SelectConcreteCountOfTriplets(dictionary);
-            Output(outputItems);
+            WriteResultToOutputStream(outputItems);
         }
 
         /// <summary>
@@ -68,30 +70,48 @@ namespace Triplets_Extractor
         /// </summary>
         public void DoInMultytaskScenario()
         {
-            List<Task<Dictionary<(byte, byte, byte), int>>> tasks = new();
-            
-            long lengthOfStream = _inputStream.Length;
-            int partOfBytesLength = (int)(lengthOfStream / (Environment.ProcessorCount * _coefficientOfProcessorUsing));
-            byte[] partOfBytes = new byte[partOfBytesLength];
+            List<Task<Dictionary<(char, char, char), int>>> tasks = new();
 
-            while (_inputStream.Position < lengthOfStream)
+            long lengthOfStream = _inputStream.BaseStream.Length;
+
+            if (lengthOfStream < MinFileSizeForMultytaskScenario)
             {
-                if (lengthOfStream - _inputStream.Position < partOfBytesLength) 
-                    partOfBytes = new byte[lengthOfStream - _inputStream.Position];
-
-                _inputStream.Read(partOfBytes);
-
-                var cloneBytesArray = (byte[])partOfBytes.Clone();
-
-                tasks.Add(Task.Run(() => FillPartialDictionary(cloneBytesArray)));
-
-                _inputStream.Position = _inputStream.Position >= lengthOfStream - 1 ? lengthOfStream : _inputStream.Position - 2;
+                Do();
+                return;
             }
-            var r = tasks[0].Result;
+
+            long charsArrayLength = (int)(lengthOfStream / (Environment.ProcessorCount * _coefficientOfProcessorUsing));
+            char[] buffer = new char[charsArrayLength];
+            long position = 0;
+            char last = default;
+            char preLast = default;
+
+            while (!_inputStream.EndOfStream)
+            {
+                char[] bufferCopy = new char[buffer.Length + 2];
+                bufferCopy[0] = preLast;
+                bufferCopy[1] = last;
+
+                if (lengthOfStream - position < charsArrayLength)
+                {
+                    charsArrayLength = lengthOfStream - position;
+                    buffer = new char[charsArrayLength];
+                }
+
+                _inputStream.ReadBlock(buffer, 0, buffer.Length);
+
+                preLast = buffer[^2];
+                last = buffer[^1];
+
+                position += charsArrayLength;
+
+                buffer.CopyTo(bufferCopy, 2);
+                tasks.Add(Task.Run(() => FillPartialDictionary(bufferCopy)));
+            }
 
             var dictionaries = Task.WhenAll(tasks).Result;
 
-            Dictionary<(byte, byte, byte), int> commonDictionary = new();
+            Dictionary<(char, char, char), int> commonDictionary = new();
 
             foreach (var item in dictionaries)
             {
@@ -100,25 +120,25 @@ namespace Triplets_Extractor
 
             IEnumerable<OutT> outputItems = SelectConcreteCountOfTriplets(commonDictionary);
 
-            Output(outputItems);
+            WriteResultToOutputStream(outputItems);
         }
 
-        private IEnumerable<OutT> SelectConcreteCountOfTriplets(Dictionary<(byte, byte, byte), int> dictionary)
+        private IEnumerable<OutT> SelectConcreteCountOfTriplets(Dictionary<(char, char, char), int> dictionary)
         {
-            DisplacementCollection<(byte, byte, byte), int> resultCollection = new(Count, Comparer<int>.Default.Compare);
+            DisplacementCollection<(char, char, char), int> resultCollection = new(Count, Comparer<int>.Default.Compare);
 
             foreach (var item in dictionary)
             {
                 resultCollection.Insert(item.Key, item.Value);
             }
 
-            IEnumerable<OutT> outputItems = resultCollection
-                .GetCollection()
-                .Select(x => _outputFormat(x.Key.Item1, x.Key.Item2, x.Key.Item3, x.Value));
-            return outputItems;
+            return resultCollection
+                    .GetCollection()
+                    .OrderByDescending(x => x.Value)
+                    .Select(x => _outputFormat(x.Key.Item1, x.Key.Item2, x.Key.Item3, x.Value));
         }
 
-        private void Output(IEnumerable<OutT> outPutItems)
+        private void WriteResultToOutputStream(IEnumerable<OutT> outPutItems)
         {
             foreach (var item in outPutItems)
             {
@@ -127,104 +147,77 @@ namespace Triplets_Extractor
             }
         }
 
-        private Dictionary<(byte, byte, byte), int> FillDictionary()
+        private Dictionary<(char, char, char), int> FillDictionary()
         {
-            Dictionary<(byte, byte, byte), int> dictionary = new();
+            Dictionary<(char, char, char), int> dictionary = new();
 
-            byte firstLetter = default;
-            byte secondLetter = default;
-            byte lettersInRow = 0;
-            int currentByte;
+            char firstLetter = default;
+            char secondLetter = default;
+            ushort lettersInRow = 0;
+            int currentCharInt;
 
-            while ((currentByte = _inputStream.ReadByte()) > 0)
+            while ((currentCharInt = _inputStream.Read()) > 0)
             {
-                if (char.IsLetter((char)currentByte))
-                {
-                    lettersInRow++;
-
-                    switch (lettersInRow)
-                    {
-                        case 1:
-                            firstLetter = (byte)currentByte;
-                            break;
-                        case 2:
-                            secondLetter = (byte)currentByte;
-                            break;
-                        case 3:
-                            if (dictionary.ContainsKey((firstLetter, secondLetter, (byte)currentByte)))
-                            {
-                                dictionary[(firstLetter, secondLetter, (byte)currentByte)] += 1;
-                            }
-                            else
-                            {
-                                dictionary.Add((firstLetter, secondLetter, (byte)currentByte), 1);
-                            }
-
-                            (firstLetter, secondLetter) = (secondLetter, (byte)currentByte);
-                            lettersInRow = 2;
-                            break;
-                        default:
-                            break;
-                    }
-                }
-                else
-                {
-                    lettersInRow = 0;
-                }
+                char currentChar = char.ToLowerInvariant((char)currentCharInt);
+                CheckChar(dictionary, ref firstLetter, ref secondLetter, ref lettersInRow, currentChar);
             }
 
             return dictionary;
         }
 
-        private Dictionary<(byte, byte, byte), int> FillPartialDictionary(byte[] bytes)
+        private Dictionary<(char, char, char), int> FillPartialDictionary(char[] chars)
         {
-            Dictionary<(byte, byte, byte), int> dictionary = new();
+            Dictionary<(char, char, char), int> dictionary = new();
 
-            byte firstLetter = default;
-            byte secondLetter = default;
-            byte lettersInRow = 0;
-            int bytesLength = bytes.Length;
+            char firstLetter = default;
+            char secondLetter = default;
+            ushort lettersInRow = 0;
+            int bytesLength = chars.Length;
 
             for (int i = 0; i < bytesLength; i++)
             {
-                byte currentByte = bytes[i];
-
-                if (char.IsLetter((char)currentByte))
-                {
-                    lettersInRow++;
-
-                    switch (lettersInRow)
-                    {
-                        case 1:
-                            firstLetter = currentByte;
-                            break;
-                        case 2:
-                            secondLetter = currentByte;
-                            break;
-                        case 3:
-                            if (dictionary.ContainsKey((firstLetter, secondLetter, currentByte)))
-                            {
-                                dictionary[(firstLetter, secondLetter, currentByte)] += 1;
-                            }
-                            else
-                            {
-                                dictionary.TryAdd((firstLetter, secondLetter, currentByte), 1);
-                            }
-
-                            (firstLetter, secondLetter) = (secondLetter, currentByte);
-                            lettersInRow = 2;
-                            break;
-                        default:
-                            break;
-                    }
-                }
-                else
-                {
-                    lettersInRow = 0;
-                }
+                char currentChar = char.ToLowerInvariant(chars[i]);
+                CheckChar(dictionary, ref firstLetter, ref secondLetter, ref lettersInRow, currentChar);
             }
 
             return dictionary;
+        }
+
+        private static void CheckChar(Dictionary<(char, char, char), int> dictionary, ref char firstLetter, ref char secondLetter, ref ushort lettersInRow, char currentChar)
+        {
+            if (char.IsLetter(currentChar))
+            {
+                lettersInRow++;
+
+                switch (lettersInRow)
+                {
+                    case 1:
+                        firstLetter = currentChar;
+                        break;
+                    case 2:
+                        secondLetter = currentChar;
+                        break;
+                    case 3:
+                        if (dictionary.ContainsKey((firstLetter, secondLetter, currentChar)))
+                        {
+                            dictionary[(firstLetter, secondLetter, currentChar)] += 1;
+                        }
+                        else
+                        {
+                            dictionary.Add((firstLetter, secondLetter, currentChar), 1);
+                        }
+
+                        (firstLetter, secondLetter) = (secondLetter, currentChar);
+                        lettersInRow = 2;
+                        break;
+                    default:
+                        throw new IndexOutOfRangeException(nameof(lettersInRow));
+                }
+            }
+            else
+            {
+                lettersInRow = 0;
+            }
         }
     }
 }
